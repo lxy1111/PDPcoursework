@@ -1,0 +1,28 @@
+The time of route planning is 0.0196043
+======= Report at 0 hours =======
+155 ships at sea, 0 ships in port, 3875 tonnes in transit
+======= Report at 1000 hours =======
+195 ships at sea, 3 ships in port, 4660 tonnes in transit
+======= Report at 2000 hours =======
+194 ships at sea, 0 ships in port, 4520 tonnes in transit
+======= Report at 3000 hours =======
+194 ships at sea, 0 ships in port, 4490 tonnes in transit
+======= Report at 4000 hours =======
+188 ships at sea, 3 ships in port, 4405 tonnes in transit
+======= Report at 5000 hours =======
+192 ships at sea, 0 ships in port, 4445 tonnes in transit
+======= Report at 6000 hours =======
+192 ships at sea, 0 ships in port, 4445 tonnes in transit
+======= Report at 7000 hours =======
+190 ships at sea, 0 ships in port, 4385 tonnes in transit
+======= Report at 8000 hours =======
+204 ships at sea, 1 ships in port, 4075 tonnes in transit
+======= Report at 9000 hours =======
+205 ships at sea, 0 ships in port, 4125 tonnes in transit
+The time of simulation is 28.9947
+======= Final report at 10000 hours =======
+Port 2 shipped 1200 tonnes and 0 arrived
+Port 0 shipped 2100 tonnes and 1645 arrived
+Port 4 shipped 4150 tonnes and 810 arrived
+Port 3 shipped 915 tonnes and 610 arrived
+Port 1 shipped 1110 tonnes and 1760 arrived

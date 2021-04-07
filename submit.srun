@@ -1,0 +1,31 @@
+#!/bin/bash
+
+# Slurm job options (job-name, compute nodes, job time)
+#SBATCH --job-name=ship
+#SBATCH --time=0:30:0
+#SBATCH --nodes=32
+#SBATCH --tasks-per-node=32
+#SBATCH --cpus-per-task=1
+#SBATCH --output=%x-%j.out
+#SBATCH --error=%x-%j.err
+#SBATCH --exclusive
+
+# Replace [budget code] below with your budget code (e.g. t01)
+#SBATCH --account=dc116-s2043919
+#SBATCH --partition=standard
+#SBATCH --qos=standard
+
+# Setup the job environment (this module needs to be loaded before any other modules)
+module load intel-compilers-19
+module load mpt
+
+
+# Set the number of threads to 1
+#   This prevents any threaded system libraries from automatically 
+#   using threading.
+export OMP_NUM_THREADS=1
+
+# Launch the parallel job
+#   srun picks up the distribution from the sbatch options
+
+srun --distribution=block:block --hint=nomultithread ./ships config_2.txt
