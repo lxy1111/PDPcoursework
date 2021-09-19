@@ -1,7 +1,7 @@
 # Medium sized configuration, will take some time to run in serial
 
-SIZE_X=8192
-SIZE_Y=4096
+SIZE_X=1024
+SIZE_Y=1024
 NUM_TIMESTEPS=1000
 DT=10
 INITIAL_SHIPS=30

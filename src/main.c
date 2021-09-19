@@ -7,6 +7,7 @@
 #include "mpi.h"
 
 #define MAX_SHIPS_PER_CELL 200
+#define ROUTE_PLANNER_TO_USE 0
 #define SIMULATION_TO_USE 0
 
 // Data associated with each ship
@@ -49,14 +50,14 @@ int size, myrank, nx, ny, local_nx;
 MPI_Datatype shiptype;
 
 static void finalise_simulation();
-static void run_simulation(struct simulation_configuration_struct *, int, int, int, int, void (*)(int, int), void (*)(struct simulation_configuration_struct *), void (*)());
+static void run_simulation(struct simulation_configuration_struct *, void (*)(int, int), void (*)(struct simulation_configuration_struct *), void (*)(struct simulation_configuration_struct *), void (*)(int, int, int, int *, int *), int (*)(struct cell_struct *), void (*)());
+static void run_route_planner(struct simulation_configuration_struct, int, int, int, int, int (*)(int, int, int, int));
 static void init_simulation(int, int);
 static void initialiseDomain(struct simulation_configuration_struct *);
 static void initialisePort(struct simulation_configuration_struct *, struct cell_struct *, int, int);
-static void simulation(struct simulation_configuration_struct *);
 static void reportFinalInformation(struct simulation_configuration_struct *);
 static void updateProperties(struct simulation_configuration_struct *);
-static void updateMovement(struct simulation_configuration_struct *);
+static void updateMovement(struct simulation_configuration_struct *, void (*)(int, int, int, int *, int *), int (*)(struct cell_struct *));
 static void processPort(struct simulation_configuration_struct *, struct cell_struct *);
 static void processWater(struct cell_struct *, int);
 static int findFreeShipIndex(struct cell_struct *);
@@ -137,25 +138,16 @@ int main(int argc, char *argv[])
     basex = myrank * local_nx;
   }
 
-  initialise_routemap(&simulation_configuration, local_nx, myrank, size, basex);
-  initialiseSimulationSupport();
+// This is a resuable framework for route planner. If there are different ways of generating route, just add ROUTE_PLANNER_TO_USE
+// and write the corresponding function
+#if ROUTE_PLANNER_TO_USE == 0
+  run_route_planner(simulation_configuration, local_nx, myrank, size, basex, generate_route);
+#endif
 
-  // Parallelize the route planning and record the time
-  MPI_Barrier(MPI_COMM_WORLD);
-  double time1 = MPI_Wtime();
-  calculate_routes(&simulation_configuration);
-  MPI_Barrier(MPI_COMM_WORLD);
-  double time2 = MPI_Wtime();
-
-  if (myrank == 0)
-  {
-    printf("The time of route planning is %g\n", time2 - time1);
-  }
-
-// This is a framework to make the program more scalable and reusable. If there are more ways of simulation, just add SIMULATION_TO_USE 
+// This is a framework to make the program reusable. If there are more ways of simulation, just add SIMULATION_TO_USE
 // and write the corresponding simualtion functions
 #if SIMULATION_TO_USE == 0
-  run_simulation(&simulation_configuration, local_nx, ny, myrank, size, init_simulation, simulation, finalise_simulation);
+  run_simulation(&simulation_configuration, init_simulation, initialiseDomain, updateProperties, getNextCell, findFreeShipIndex, finalise_simulation);
 #endif
 
   MPI_Finalize();
@@ -174,19 +166,62 @@ static void finalise_simulation()
   free(sub_domain);
 }
 
+// start route planning
+static void run_route_planner(struct simulation_configuration_struct simulation_configuration, int local_nx, int myrank, int size, int basex, int (*generate_route_strategy)(int, int, int, int))
+{
+  initialise_routemap(&simulation_configuration, local_nx, myrank, size, basex);
+  initialiseSimulationSupport();
+
+  // Parallelize the route planning and record the time
+  MPI_Barrier(MPI_COMM_WORLD);
+
+  double time1 = MPI_Wtime();
+
+  calculate_routes(&simulation_configuration, generate_route_strategy);
+
+  MPI_Barrier(MPI_COMM_WORLD);
+
+  double time2 = MPI_Wtime();
+
+  if (myrank == 0)
+  {
+    printf("The time of route planning is %g\n", time2 - time1);
+  }
+}
+
 // Start simulation
-static void run_simulation(struct simulation_configuration_struct *simulation_configuration, int local_nx, int ny, int myrank, int size, void (*init_simulation)(int, int), void (*go_simulate)(struct simulation_configuration_struct *), void (*finalise_simulation)())
+static void run_simulation(struct simulation_configuration_struct *simulation_configuration, void (*init_simulation)(int, int), void (*initialise_domain_strategy)(struct simulation_configuration_struct *), void (*update_properties_strategy)(struct simulation_configuration_struct *), void (*get_next_cell_strategy)(int, int, int, int *, int *), int (*find_fresh_index_strategy)(struct cell_struct *), void (*finalise_simulation)())
 {
   int mem_size_x = local_nx + 2;
   int mem_size_y = ny + 2;
 
   init_simulation(mem_size_x, mem_size_y);
 
-  double start_time;
+  MPI_Barrier(MPI_COMM_WORLD);
+  double time1 = MPI_Wtime();
 
-  initialiseDomain(simulation_configuration);
+  initialise_domain_strategy(simulation_configuration);
 
-  go_simulate(simulation_configuration);
+  int hours = 0;
+
+  // Run the parallelized simulation - will loop through the configured number of timesteps
+  for (int i = 0; i < simulation_configuration->number_timesteps; i++)
+  {
+    update_properties_strategy(simulation_configuration);
+
+    updateMovement(simulation_configuration, get_next_cell_strategy, find_fresh_index_strategy);
+
+    if (i % simulation_configuration->reportStatsEvery == 0)
+      reportGeneralStatistics(simulation_configuration, hours);
+    hours += simulation_configuration->dt; // Update the simulation hours by dt which is the number of hours per timestep
+  }
+  MPI_Barrier(MPI_COMM_WORLD);
+  double time2 = MPI_Wtime();
+
+  if (myrank == 0)
+  {
+    printf("The time of simulation is %g\n", time2 - time1);
+  }
 
   reportFinalInformation(simulation_configuration);
 
@@ -310,32 +345,6 @@ static void initialisePort(struct simulation_configuration_struct *simulation_co
   specific_cell->port_data.cargoShipped = 0;
 }
 
-// Run the parallelized simulation - will loop through the configured number of timesteps
-static void simulation(struct simulation_configuration_struct *simulation_configuration)
-{
-  int hours = 0;
-  MPI_Status stats;
-  MPI_Barrier(MPI_COMM_WORLD);
-  double time1 = MPI_Wtime();
-  for (int i = 0; i < simulation_configuration->number_timesteps; i++)
-  {
-
-    updateProperties(simulation_configuration);
-
-    updateMovement(simulation_configuration);
-
-    if (i % simulation_configuration->reportStatsEvery == 0)
-      reportGeneralStatistics(simulation_configuration, hours);
-    hours += simulation_configuration->dt; // Update the simulation hours by dt which is the number of hours per timestep
-  }
-  MPI_Barrier(MPI_COMM_WORLD);
-  double time2 = MPI_Wtime();
-  if (myrank == 0)
-  {
-    printf("The time of simulation is %g\n", time2 - time1);
-  }
-}
-
 // Reports general statistics about the state of the simulation, called periodically during the simulation run
 static void reportGeneralStatistics(struct simulation_configuration_struct *simulation_configuration, int time)
 {
@@ -393,7 +402,7 @@ static void updateProperties(struct simulation_configuration_struct *simulation_
 }
 
 // Will update the moment of ships from a specific cell to their next one respectively
-static void updateMovement(struct simulation_configuration_struct *simulation_configuration)
+static void updateMovement(struct simulation_configuration_struct *simulation_configuration, void (*get_next_cell_strategy)(int, int, int, int *, int *), int (*find_fresh_index_strategy)(struct cell_struct *))
 {
   // Define the sending buffers, lengths of them and the positions of y
   int len1 = 0;
@@ -416,7 +425,7 @@ static void updateMovement(struct simulation_configuration_struct *simulation_co
           int newX, newY;
           // Asks the route planner for the next cell to move to based on the route this ship is following and the
           // current X and Y location of the ship. This is returned via the newX and newY pointers
-          getNextCell(specific_cell->ships_data[z]->route, basex + specific_cell->x - 1, specific_cell->y - 1, &newX, &newY);
+          get_next_cell_strategy(specific_cell->ships_data[z]->route, basex + specific_cell->x - 1, specific_cell->y - 1, &newX, &newY);
 
           specific_cell->ships_data[z]->willMoveThisTimestep = false;
 
@@ -457,7 +466,7 @@ static void updateMovement(struct simulation_configuration_struct *simulation_co
           }
           else // Otherwise update it in its own area
           {
-            int newIndex = findFreeShipIndex(&sub_domain[((j + newX) * (ny + 2)) + k + newY]);
+            int newIndex = find_fresh_index_strategy(&sub_domain[((j + newX) * (ny + 2)) + k + newY]);
             if (newIndex > -1)
             {
               sub_domain[((j + newX) * (ny + 2)) + k + newY].ships_data[newIndex] = specific_cell->ships_data[z];
@@ -540,7 +549,7 @@ static void updateMovement(struct simulation_configuration_struct *simulation_co
       {
         int y = receiveys1[j];
 
-        int newIndex = findFreeShipIndex(&sub_domain[local_nx * (ny + 2) + y]);
+        int newIndex = find_fresh_index_strategy(&sub_domain[local_nx * (ny + 2) + y]);
         if (newIndex > -1)
         {
           sub_domain[local_nx * (ny + 2) + y].ships_data[newIndex] = &receiveShips1[j];
@@ -569,7 +578,7 @@ static void updateMovement(struct simulation_configuration_struct *simulation_co
       {
         int y = receiveys2[j];
 
-        int newIndex = findFreeShipIndex(&sub_domain[ny + 2 + y]);
+        int newIndex = find_fresh_index_strategy(&sub_domain[ny + 2 + y]);
         if (newIndex > -1)
         {
 

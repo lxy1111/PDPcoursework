@@ -79,7 +79,7 @@ void initialise_routemap(struct simulation_configuration_struct *simulation_conf
 // Calculates the routes that have been specified in the configuration. These planned routes are then stored here and can be
 // used during the simulation. Note that if it is not possible to plan a route (there are some limitation to the planning logic)
 // then an error is displayed
-void calculate_routes(struct simulation_configuration_struct *simulation_configuration)
+void calculate_routes(struct simulation_configuration_struct *simulation_configuration, int (*generate_route_strategy)(int, int, int, int))
 {
   for (int i = 0; i < simulation_configuration->number_ports; i++)
   {
@@ -87,8 +87,8 @@ void calculate_routes(struct simulation_configuration_struct *simulation_configu
     {
       if (i != j)
       {
-        int route_index = generate_route(simulation_configuration->ports[i].x, simulation_configuration->ports[i].y,
-                                         simulation_configuration->ports[j].x, simulation_configuration->ports[j].y);
+        int route_index = generate_route_strategy(simulation_configuration->ports[i].x, simulation_configuration->ports[i].y,
+                                                  simulation_configuration->ports[j].x, simulation_configuration->ports[j].y);
 
         if (route_index == -1)
         {
@@ -234,7 +234,6 @@ int generate_route(int cell_source_x, int cell_source_y, int cell_target_x, int 
     return -1;
   }
 }
-
 
 // Performs the halo swap of the boundary grids of route
 void perform_halo_swap(int myrank, int size, int local_nx, int ny, int mem_size_y, int *data)
